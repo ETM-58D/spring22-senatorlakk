@@ -2,7 +2,7 @@
 
 ### Homework 0 (March 27)
 
-[Here](*C:\Users\user\Documents\interesting r examples.html) is my 5 interesting R examples.
+[Here](file:///C:/Users/user/Documents/interesting%20r%20examples.html) is my 5 interesting R examples.
 
 ### Homework 1
 
