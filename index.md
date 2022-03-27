@@ -1,4 +1,4 @@
-## Welcome to My Page as ETM58D Progress Journal !
+## Welcome to My Page as ETM 58D Progress Journal !
 
 ### Homework 0 (March 27)
 
