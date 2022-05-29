@@ -1,0 +1,264 @@
+---
+title: "ETM58D "
+author: "Sena Torlak"
+date: "29.05.2022"
+output:
+  html_document:
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+    number_sections: yes
+    code_folding: hide
+    theme: journal
+  
+subtitle: Homework 2
+---
+# Introduction
+
+Time-dependent changes in economic data can be considered as time series. However, in order to make an economic analysis in detail, it is necessary to master the dynamics of the economy because these different types of data can affect each other directly or indirectly at different rates. This may not be always that easy to observe as the duration of action can also differ or there may be other current effects. 
+
+Nevertheless, in this analysis, some data provided by [Central Bank of the Republic of Turkey](https://evds2.tcmb.gov.tr/) will be handled and their relationship with each other will be examined based on basic economic knowledge. 
+
+First, it is necessary to decide on 3 data sets from 3 different categories that I think are related to each other. Dollar exchange rate data is the first one I chose because it has a great commercial impact on Turkey's economy especially in these days. Later, when I evaluated consumers that could be greatly affected by the increase of dollar exchange rate, consumer confidence index  came to my mind. So, the overall price index is also chosen as the second economic measure will most likely increase with the effect of the exchange rate. 
+
+In short, this report is to clarify whether the exchange rate of USD, the price index and the consumer confidence index are related to each other. The monthly based time series data for nearly 5 years is determined. It will be visualized and some correlation analysis will be made in the analysis section.  
+
+# Analysis
+```{r message=FALSE,warning=FALSE}
+
+#install.packages('openxlsx')
+#install.packages('ggplot2')
+#install.packages('data.table')
+#install.packages('skimr')
+#install.packages('GGally')
+#install.packages('ggcorrplot')
+#install.packages(file.choose(),repos=NULL)
+
+require(openxlsx) 
+library(openxlsx)
+require(ggplot2)
+require(data.table)
+require(skimr)
+require(GGally)
+require(ggcorrplot)
+
+#install.packages("readxl")
+library(readxl)
+data_path=file.choose()
+
+invest=read_excel(data_path,sheet=1)
+str(invest)
+#install.packages("skimr")
+library(skimr)
+summary_data=skim(invest)
+print(summary_data)
+#install.packages("data.table")
+library(data.table)
+invest=data.table(invest)
+str(invest)
+library(ggplot2)
+```
+
+## Analysis with the Real Values 
+
+### Visualization of Time Series
+
+Monthly time series data of about five years are plotted as follows:
+
+```{r message=FALSE,warning=FALSE}
+
+ggplot(invest,aes(x=Date,y=USD.Exchange.Rate))+ 
+  geom_line(color="red")+
+  ggtitle("Time Series of Exchange Rate USD/TRY",
+          subtitle="Between the Years 2017-2022")
+
+ggplot(invest,aes(x=Date,y=Price.Index))+ 
+  geom_line(color="purple")+
+  ggtitle("Time Series of Price Index",
+          subtitle="Between the Years 2017-2022")
+
+ggplot(invest,aes(x=Date,y=Consumer.Confidence.Index))+ 
+  geom_line(color="green")+
+  ggtitle("Time Series of Consumer Confidence Index",
+          subtitle="Between the Years 2017-2022")
+
+```
+When looking at the changes of the measurements over time, the followings can be understood visually: 
+
+- Dollar exchange rate and price index are highly correlated and always tend to increase except for some breaks. 
+
+- While small fluctuations in the exchange rate is more visible, the price index follows a smoother course. However, consumer confidence index has a more fluctuation which can be a result of that consumer confidence index is not only affected by price index & exchange rate. There are other parameters for CCI. 
+
+- Even though CCI is not only related to these 2 parameters, exchange rate and price index caused a significant decrease trend for CCI between 2017 and 2022.
+
+### Visualization of Distributions 
+
+```{r message=FALSE,warning=FALSE}
+dist1<- invest%>%
+  ggplot(.,aes(x=USD.Exchange.Rate))+
+  geom_density(color="darkgrey",fill="red",adjust=1.5, alpha=.3) +
+  ggtitle("Distribution of Exchange Rate Values")
+dist1
+
+print(paste("Variance of Exchange Rate Values:", var(invest$USD.Exchange.Rate)))
+print(paste("Mean of Exchange Rate Values:",mean(invest$USD.Exchange.Rate)))
+```
+The average value of the exchange rate is very close to the minimum value of 5 years of data. This can be attributed to the fact that the time interval for initial small values is wider and the increase in the ratio in recent years has been sharper. These reasons can also be supported by annual density plots
+
+```{r message=FALSE,warning=FALSE}
+dist1<- invest%>%
+  ggplot(.,aes(x=Price.Index))+
+  geom_density(color="darkgrey",fill="purple",adjust=1.5, alpha=.3) +
+  ggtitle("Distribution of Price Index Values")
+dist1
+
+print(paste("Variance of Price Index Values:", var(invest$Price.Index)))
+print(paste("Mean of Price Index Values:",mean(invest$Price.Index)))
+```
+It can be seen that the shape of the first chart is almost the same as the first chart in the exchange rate, the only difference is the scale. Therefore, the same analysis can be made for the price index.
+
+
+```{r message=FALSE,warning=FALSE}
+dist1<- invest%>%
+  ggplot(.,aes(x=Consumer.Confidence.Index))+
+  geom_density(color="darkgrey",fill="green",adjust=1.5, alpha=.3) +
+  ggtitle("Distribution of Consumer Confidence Index Values")
+dist1
+
+print(paste("Variance of Consumer Confidence Index Values:", var(invest$Consumer.Confidence.Index)))
+print(paste("Mean of Consumer Confidence Index Values:",mean(invest$Consumer.Confidence.Index)))
+```
+The situation here is different from Price Index & Exchange Rate. While CCI is placing in middle values mostly, there is sharp increasing trend for other parameters. This is showing that CCI is also decreasing over time but as sharp as others and not as smooth as others.
+
+### Visualization of Pairwise Correlations
+
+In addition to visual inspection, when correlation values between the time series are calculated, it is seen that the relationship between the price index and the USD exchange rate is the highest as expected. When looking at other pairwise correlation values, even if such a high value is not obtained, a value that confirms that they have relationships is reached. Demonstration of the correlation values is as follows:
+
+```{r message=FALSE,warning=FALSE}
+#install.packages("corrplot")
+library(corrplot)
+cor_numVar <- cor(invest[,c(2,3,4)], use="pairwise.complete.obs") 
+corrplot.mixed(cor_numVar, tl.col="black", tl.pos = "lt")
+```
+## Analysis with the Normalized Values 
+
+### Visualization of Time Series
+
+Comparison of change amounts may not be very convenient since the magnitude of the values is not similar. For this reason, if we normalize all the values, the comparison of the values that will be in the same scale can be done without any problem.
+
+```{r message=FALSE, warning=FALSE}
+#install.packages("dplyr")
+library(dplyr)
+min1<-min(invest$USD.Exchange.Rate)
+max1<-max(invest$USD.Exchange.Rate)
+min2<-min(invest$Price.Index)
+max2<-max(invest$Price.Index)
+min3<-min(invest$Consumer.Confidence.Index)
+max3<-max(invest$Consumer.Confidence.Index)
+data<-invest%>% mutate(N_USD.Exchange.Rate=(USD.Exchange.Rate-min1)/(max1-min1),
+              N_Price.Index=(Price.Index-min2)/(max2-min2),
+              N_Consumer.Confidence.Index=(Consumer.Confidence.Index-min3)/(max3-min3))
+```
+
+```{r message=FALSE,warning=FALSE}
+#install.packages("ggplot2")
+library(ggplot2)
+#install.packages("tidyverse")
+library(tidyverse)
+data%>%pivot_longer(.,cols=c(N_USD.Exchange.Rate,N_Price.Index,N_Consumer.Confidence.Index),
+                    names_to="name",
+                    values_to="values")%>%
+  ggplot(.,aes(x=Date,y=values,color=name,shape=name))+
+  geom_line(size=1)+
+  labs(color="Normalized Economic Measures",
+       y="Normalized Values")+
+  scale_colour_discrete()+
+  ggtitle("Comparison of Time Series",
+          subtitle="With the Normalized Values")
+```
+The Consumer Confidence Index series fluctuates the most over time. The fluctuations may be due to the re-determination of CCI against economic changes and this process probably takes time.These fluctuations and the rapid decline after 2021 may be the reason for the higher correlation values initially calculated. Besides, these three time series follow each other in general until 2021 and are similarly affected by the changes.
+
+### Visualization of Distributions
+
+```{r message=FALSE,warning=FALSE}
+#install.packages("ggridges")
+library(ggridges)
+norm1<-data%>%pivot_longer(.,cols=c(N_USD.Exchange.Rate,N_Price.Index,N_Consumer.Confidence.Index),
+                    names_to="name",
+                    values_to="values")%>%
+  ggplot(.,aes(x=values,y=factor(name),fill=factor(name)))+
+  geom_density_ridges() +
+  labs(color="Normalized Economic Measures",
+       y="Normalized Values")+
+  theme(legend.position = "none")+
+  ggtitle("Distribution of the Normalized Values")
+norm1
+print(paste("Variance of the Normalized Exchange Rate:",var(data$N_USD.Exchange.Rate)))
+print(paste("Variance of the Normalized Price Index:",var(data$N_Price.Index)))
+print(paste("Variance of the Normalized Consumer Confidence Index:",var(data$N_Consumer.Confidence.Index)))
+
+```
+Since normalization does not affect the shape of the density plots, the visual analysis in the first part remains valid. Thanks to normalization, all three plots can be expressed on the same scale and variances can be compared more clearly. According to the results, although the variance values are very close, the smallest value is observed in the price index and the largest value in the consumer confidence index.
+
+### Visualization of Pairwise Correlations
+
+Since normalizing the values will not change the correlation values, the correlation value calculated on all data will not change. For this reason, this time we can calculate with another test method, Kendall.
+
+```{r}
+res1 <- cor.test(data$N_USD.Exchange.Rate, data$N_Consumer.Confidence.Index,  method="kendall")
+res1
+res2 <- cor.test(data$N_USD.Exchange.Rate, data$N_Price.Index,  method="kendall")
+res2
+res3 <- cor.test(data$N_Price.Index, data$N_Consumer.Confidence.Index,  method="kendall")
+res3
+```
+When looking at the pairwise results obtained here, it is seen that the correlation values are almost the same with the values calculated before. Since the p-values of the tests are quite small, these tests can be trusted. 
+
+```{r message=FALSE,warning=FALSE}
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+d<-data%>%group_by(year(Date))%>%
+  mutate(ExchangeRateUSD_PriceIndex=cor(N_USD.Exchange.Rate,N_Price.Index),
+         ExchangeRateUSD_ConsumerConfidenceIndex=cor(N_USD.Exchange.Rate,N_Consumer.Confidence.Index),
+         PriceIndex_ConsumerConfidenceIndex=cor(N_Price.Index,N_Consumer.Confidence.Index))
+d%>%
+  pivot_longer(.,cols=c(ExchangeRateUSD_PriceIndex,ExchangeRateUSD_ConsumerConfidenceIndex,PriceIndex_ConsumerConfidenceIndex))%>%
+  ggplot(., aes(x=year(Date), y=value)) +
+  geom_line( aes(color=name)) +
+  geom_point(aes( fill=name),shape=21, color="black", size=6) +
+  labs(fill="Between:",color="Between:",
+       y="Correlation",
+       x="Year")+
+  facet_wrap(~name)+
+  ggtitle("Pairwise Yearly Correlations")+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        strip.text.x = element_blank())+
+  scale_fill_discrete(labels=c("ExchangeRate-Price Index","ExchangeRate-CCI","PriceIndex-CCI"))+
+  scale_color_discrete(labels=c("ExchangeRate-Price Index","ExchangeRate-CCI","PriceIndex-CCI"))
+```
+```{r message=FALSE,warning=FALSE}
+d%>%mutate(avg_corr=sum(ExchangeRateUSD_PriceIndex,
+                         ExchangeRateUSD_ConsumerConfidenceIndex,
+                         PriceIndex_ConsumerConfidenceIndex)/(3*length(year(Date))))%>%
+  ggplot(., aes(x=year(Date), y=avg_corr)) +
+  geom_line( color="grey") +
+  geom_point(shape=21, color="black", fill="#69b3a2", size=6) +
+  labs(y="Correlation",
+       x="Year")+
+  ggtitle("Average of the Pairwise Correlations",
+          subtitle="Yearly")
+```
+Correlation values are recalculated annually so that deviations in some years do not affect the total correlation. In order to be able to say that the three are related to each other at the same time, it is necessary to look at all the pairwise correlation values separately. These years which are 2019, 2020 and 2022 can be seen more clearly from the second chart. 
+
+
+# Conclusion
+
+Firstly, the change and distribution of the selected economic data over time are examined, then similar charts are also plotted with the normalized data. Although the relationship between these three measures, whose monthly data is examined throughout the analysis, is very clear in economic manner, the relationships may change from time to time due to other real-life dynamics. By visualizing the time series, the findings can be summarized as follows:
+
+- Mean values for PI & ER measures tend to increase and variance values have also increased in recent years,while CCI is decreasing with a negative relation.
+- The increase & decrease occurred rapidly in all three time series, therefore the mean values are close to their minimum values. 
+- The result obtained from normalized time series and correlation values is that the most correlated measures are the exchange rate and price index. - With the development in 2019 and the decision taken after the pandemic, the CCI decreased, which led to a decrease in correlation values. There have been fluctuations in previous periods in the CCI adapted a little later to other developments. 
+- The price index and exchange rate are highly correlated in all years.
+- The CCI which adapted slowly to the rapid increase in other measures between 2018-2019 caused the pairwise correlations to decrease in these years. 
