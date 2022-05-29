@@ -1,4 +1,4 @@
-<<<<<<< Updated upstream
+
 ## Welcome to My Page as ETM 58D Progress Journal !
 
 ### Homework 0 (March 27)
@@ -12,5 +12,4 @@
 ### Homework 3
 
 [link](https://moodle.boun.edu.tr/login/)
-=======
->>>>>>> Stashed changes
+
