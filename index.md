@@ -6,7 +6,7 @@
 [Here](https://rpubs.com/senatorlakk/882841) is my 5 interesting R examples.
 
 ### Homework 2
-[Here](https://rpubs.com/senatorlakk/907941) is my 5 interesting R examples.
+[Here](https://rpubs.com/senatorlakk/907941) is HW2.
 
 ### Homework 3&4
 
