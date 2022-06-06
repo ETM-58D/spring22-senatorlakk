@@ -12,7 +12,7 @@
 
 
 ### Final
-[Here](file:///C:/Users/user/Documents/GitHub/spring22-senatorlakk/Final/Final.html) is my final page
+[Here](https://rpubs.com/senatorlakk/911367) is my final page
 
 [link](https://moodle.boun.edu.tr/login/)
 
