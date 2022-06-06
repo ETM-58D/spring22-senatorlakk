@@ -1,0 +1,126 @@
+---
+title: "ETM 58D - HW 3&4"
+author: "Sena Torlak"
+date: '2022-06-05'
+output: html_document
+---
+
+#Part 1 - HW3
+```{r message=FALSE,warning=FALSE}
+install.packages("tidyverse")
+install.packages("scatterplot3d")
+install.packages("tibble")
+
+library(tidyverse)
+library(scatterplot3d)
+library(tibble)
+
+x <- read.table("uWaveGestureLibrary_X_TRAIN.txt")
+y <- read.table("uWaveGestureLibrary_Y_TRAIN.txt")
+z <- read.table("uWaveGestureLibrary_Z_TRAIN.txt")
+
+x <- t(x)
+y <- t(y)
+z <- t(z)
+
+bind1 <- cbind(x[,11], y[,11], z[,11])
+bind2 <- cbind(x[,20], y[,20], z[,20])
+bind3 <- cbind(x[,4], y[,4], z[,4])
+bind4 <- cbind(x[,5], y[,5], z[,5])
+bind5 <- cbind(x[,2], y[,2], z[,2])
+bind6 <- cbind(x[,1], y[,11], z[,11])
+bind7 <- cbind(x[,7], y[,7], z[,7])
+bind8 <- cbind(x[,6], y[,6], z[,6])
+
+
+scatterplot3d(x[,11], y[,11], z[,11], main="Class 1", color = 1)
+scatterplot3d(x[,20], y[,20], z[,20], main="Class 2", color = 2)
+scatterplot3d(x[,4], y[,4], z[,4], main="Class 3", color = 3)
+scatterplot3d(x[,5], y[,5], z[,5], main="Class 4", color = 4)
+scatterplot3d(x[,2], y[,2], z[,2], main="Class 5", color = 5)
+scatterplot3d(x[,1], y[,1], z[,1], main="Class 6", color = 6)
+scatterplot3d(x[,7], y[,7], z[,7], main="Class 7", color = 7)
+scatterplot3d(x[,6], y[,6], z[,6], main="Class 8", color = 8)
+
+```
+#Part 2 - HW3
+
+```{r message=FALSE,warning=FALSE}
+
+library(openxlsx)
+dist=read.xlsx("mesafe.xlsx")
+
+dist[is.na(dist)] <- 0
+head(dist)
+
+dist <- cmdscale(dist, k = 2, eig = TRUE)
+x_t1 <- dist$points[, 1]
+y_t1 <- dist$points[, 2]
+
+plot(x_t1, y_t1, pch = 19, xlab = "", ylab = "", axes = F, main = "Cities of Turkey")
+text(x_t1, y_t1, pos = 4, cex = 0.6, labels = colnames(dist))
+
+```
+#HW4 
+
+
+```{r message=FALSE,warning=FALSE}
+install.packages('factoextra')
+install.packages('cluster')
+
+require(factoextra)
+require(cluster)
+
+data_path=file.choose()
+housing=read_excel(data_path,sheet=1)
+str(housing)
+
+
+
+
+
+movtable <- data.frame(movies, ratings)
+
+movtable <- na.omit(movtable)
+sc <- scale(movtable[1:nrow(movtable),2:ncol(movtable)])
+distance <- get_dist(sc)
+
+fviz_dist(distance, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+
+
+set.seed(123)
+km.res <- kmeans(sc, 4, nstart = 25)
+
+
+fviz_cluster(km.res, data = sc,
+             palette = c("#00AFBB","#2E9FDF", "#E7B800", "#FC4E07"),
+             ggtheme = theme_minimal(),
+             main = "Partitioning Clustering Plot",
+             geom = "point")
+
+fviz_nbclust(sc, kmeans, method = "wss")
+fviz_nbclust(sc, kmeans, method = "silhouette")
+
+
+d <- dist(sc, method = "euclidean")
+
+
+hc1 <- hclust(d, method = "complete")
+
+plot(hc1, cex = 0.6, hang = -1)
+
+
+hc5 <- hclust(d, method = "ward.D2" )
+
+
+sub_grp <- cutree(hc5, k = 4)
+plot(hc5, cex = 0.6)
+rect.hclust(hc5, k = 4, border = 2:5)
+
+
+res <- hcut(movtable[1:nrow(movtable),2:ncol(movtable)], k = 4, stand = TRUE)
+
+fviz_dend(res, rect = TRUE, cex = 0.5,
+          k_colors = c("#00AFBB","#2E9FDF", "#E7B800", "#FC4E07"))
+
+```

@@ -1,0 +1,202 @@
+---
+title: "ETM 58A-Final "
+author: "Sena Torlak"
+date: "`05.06.2022`"
+output: html_document
+---
+#Finding Datasets 
+
+Here is my data sets withing their explanations about attributes and aims. 
+
+<ol>
+<li><a href="https://archive.ics.uci.edu/ml/datasets/Online+News+Popularity">Online News Popularity</a></li>
+
+<li><a href="http://archive.ics.uci.edu/ml/datasets/Absenteeism+at+work#">Absenteeism at Work</a></li>
+
+
+<li><a href="http://archive.ics.uci.edu/ml/datasets/Dry+Bean+Dataset#">Dry Bean</a></li>
+
+</ol>
+
+#Preparing Datasets 
+
+##Online News Popularity 
+
+```{r message=FALSE,warning=FALSE}
+
+#install.packages('openxlsx')
+#install.packages('data.table')
+#install.packages('skimr')
+#install.packages(file.choose(),repos=NULL)
+#install.packages("readxl")
+
+ 
+library(openxlsx)
+library(readxl)
+library(skimr)
+library(data.table)
+
+data_path_onlinenews=file.choose()
+onlinenews=read_excel(data_path_onlinenews,sheet=1)
+str(onlinenews)
+
+summary_data_onlinenews=skim(onlinenews)
+print(summary_data_onlinenews)
+
+onlinenews=data.table(onlinenews)
+str(onlinenews)
+```
+
+##Absenteeism at Work
+
+```{r message=FALSE, warning=FALSE}
+
+data_path_absenteeism=file.choose()
+absenteeism=read_excel(data_path_absenteeism,sheet=1)
+str(absenteeism)
+
+summary_data_absenteeism=skim(absenteeism)
+print(summary_data_absenteeism)
+
+absenteeism=data.table(absenteeism)
+str(absenteeism)
+```
+
+##Dry Beans
+
+```{r message=FALSE, warning=FALSE}
+
+data_path_beans=file.choose()
+drybeans=read_excel(data_path_beans,sheet=1)
+str(drybeans)
+
+summary_data_drybeans=skim(drybeans)
+print(summary_data_drybeans)
+
+drybeans=data.table(drybeans)
+str(drybeans)
+```
+
+#Analyses
+
+##Online News Popularity 
+
+
+```{r message=FALSE, warning=FALSE}
+#install.packages("caTools")
+
+
+#install.packages("ISLR")
+#install.packages("rpart")
+#install.packages("rpart.plot")
+
+library(ISLR) 
+library(rpart) 
+library(rpart.plot) 
+library(caTools)
+
+set.seed(1234)                              
+sample_onlinenews <- sample.split(onlinenews$shares, SplitRatio = 0.7)
+train_onlinenews  <- subset(onlinenews, sample_onlinenews == TRUE)
+test_onlinenews   <- subset(onlinenews, sample_onlinenews == FALSE)
+
+dim(train_onlinenews)
+dim(test_onlinenews)
+
+tree_onlinenews <- rpart(train_onlinenews$shares ~ train_onlinenews$ global_sentiment_polarity + train_onlinenews$avg_positive_polarity, data=train_onlinenews,control=rpart.control(cp=.0001))
+printcp(tree_onlinenews)
+```
+```{r message=FALSE, warning=FALSE}
+
+best_onlinenews <- tree_onlinenews$cptable[which.min(tree_onlinenews$cptable[,"xerror"]),"CP"]
+
+pruned_tree_onlinenews <- prune(tree_onlinenews, cp=best_onlinenews)
+
+prp(pruned_tree_onlinenews,
+    faclen=0,
+      extra=1,
+     roundint=F,
+     digits=5)
+
+```
+
+
+
+##Absenteeism at Work
+
+
+```{r message=FALSE, warning=FALSE}
+
+library(caTools)
+library(ISLR) 
+library(rpart) 
+library(rpart.plot) 
+
+set.seed(1234)                              
+sample_absenteeism<- sample.split(absenteeism$'Hit target', SplitRatio = 0.7)
+train_absenteeism  <- subset(absenteeism,sample_absenteeism  == TRUE)
+test_absenteeism  <- subset(absenteeism, sample_absenteeism  == FALSE)
+
+dim(train_absenteeism)
+dim(test_absenteeism )
+
+
+
+tree_absenteeism  <- rpart(train_absenteeism$'Hit target' ~ train_absenteeism$'Month of absence'+ train_absenteeism$Education, data=train_absenteeism,control=rpart.control(cp=.0001))
+printcp(tree_absenteeism )
+```
+
+
+```{r message=FALSE, warning=FALSE}
+
+best_absenteeism <- tree_absenteeism$cptable[which.min(tree_absenteeism$cptable[,"xerror"]),"CP"]
+
+pruned_tree_absenteeism <- prune(tree_absenteeism, cp=best_absenteeism)
+
+prp(pruned_tree_absenteeism,
+    faclen=0,
+      extra=1,
+     roundint=F,
+     digits=5)
+
+```
+
+
+
+##Dry Beans
+
+```{r message=FALSE, warning=FALSE}
+
+library(caTools)
+library(ISLR) 
+library(rpart) 
+library(rpart.plot) 
+
+set.seed(1234)                              
+sample_drybeans<- sample.split(drybeans$Area, SplitRatio = 0.7)
+train_drybeans  <- subset(drybeans,sample_drybeans  == TRUE)
+test_drybeans  <- subset(drybeans, sample_drybeans  == FALSE)
+
+dim(train_drybeans)
+dim(test_drybeans )
+
+
+
+tree_drybeans  <- rpart(train_drybeans$roundness ~ train_drybeans$Class+ train_drybeans$Area, data=train_drybeans,control=rpart.control(cp=.0001))
+printcp(tree_drybeans )
+```
+
+
+```{r message=FALSE, warning=FALSE}
+
+best_drybeans <- tree_drybeans$cptable[which.min(tree_drybeans$cptable[,"xerror"]),"CP"]
+
+pruned_tree_drybeans <- prune(tree_drybeans, cp=best_drybeans)
+
+prp(pruned_tree_drybeans,
+    faclen=0,
+      extra=1,
+     roundint=F,
+     digits=5)
+
+```

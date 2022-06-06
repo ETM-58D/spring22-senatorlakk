@@ -1,0 +1,108 @@
+---
+title: "ETM 58D FINAL"
+author: "Sena Torlak"
+date: "`r Sys.Date()`"
+output: html_document
+---
+#Finding Datasets
+
+Here is my data sets withing their explanations about attributes and aims. 
+
+<ol>
+<li><a href="https://archive.ics.uci.edu/ml/datasets/Online+News+Popularity">Online News Popularity</a></li>
+
+<li><a href="http://archive.ics.uci.edu/ml/datasets/Absenteeism+at+work#">Absenteeism at Work</a></li>
+
+
+<li><a href="http://archive.ics.uci.edu/ml/datasets/Dry+Bean+Dataset#">Dry Bean</a></li>
+
+</ol>
+
+#Online News Popularity 
+
+This dataset provides information about different websites traffics with various details including popularity,shares and sentiment analyses.
+
+```{r setup, include=FALSE}
+install.packages("rpart")
+install.packages('rpart.plot')
+install.packages('caret')
+install.packages('rattle')
+install.packages('randomForest')
+install.packages('ranger')
+install.packages('openxlsx')
+install.packages('data.table')
+install.packages('skimr')
+install.packages(file.choose(),repos=NULL)
+install.packages("readxl")
+
+require(ggplot2)
+require(tidyverse)
+require(rpart)
+require(dplyr)
+require(rpart.plot)
+require(caret)
+require(rattle)
+require(randomForest)
+require(ranger)
+require(openxlsx)
+require(readxl)
+require(skimr)
+require(data.table)
+
+data_path_onlinenews=file.choose()
+onlinenews=read_excel(data_path_onlinenews,sheet=1)
+str(onlinenews)
+
+summary_data_onlinenews=skim(onlinenews)
+print(summary_data_onlinenews)
+
+onlinenews=data.table(onlinenews)
+str(onlinenews)
+```
+
+##Analysis
+
+Since the dependent variables of the dataset is shares, I would like to choose that coloumn.
+
+```{r setup, include=FALSE}
+install.packages("caTools")
+library(caTools)
+
+set.seed(1234)
+
+sample_onlinenews <- sample.split(onlinenews$shares, SplitRatio = 0.7)
+train_onlinenews  <- subset(onlinenews, sample_onlinenews == TRUE)
+test_onlinenews   <- subset(onlinenews, sample_onlinenews == FALSE)
+
+head(train_onlinenews)
+head(test_onlinenews)
+
+```
+###Decision Tree
+
+```{r setup, include=FALSE}
+library(rpart)
+
+dt <- rpart(shares ~ .,data= train_onlinenews)
+rpart.plot(dt, type = 2, box.palette = "Blues")
+
+dt1 <- rpart(shares ~ .,data= train_onlinenews, method= "class")
+rpart.plot(dt1, type = 2, extra=5, box.palette = "Blues")
+  
+predictdata_onlinenews <- predict(dt1,test_onlinenews, type="class")
+predictdata_onlinenews
+  
+table_onlinenews <- table(test_onlinenews$shares, predictdata_onlinenews)
+table_onlinenews
+  
+accuracy_test_onlinenews <- sum(diag(table_onlinenews)) / sum(table_onlinenews)
+print(paste('Accuracy for decision tree algorithm', accuracy_test_onlinenews))
+  
+```
+
+
+ rf1 <- randomForest(formula= G3 ~ ., data = traindata1, ntree= 500, nodesize =5)
+  rf1
+  
+   which.min(rf1$mse)
+
