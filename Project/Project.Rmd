@@ -1,0 +1,1339 @@
+---
+title: "ETM 58D Business Analytics Project"
+author: "Sena Torlak"
+date: '2022-06-12'
+output: html_document
+---
+
+**Solar Power Forecasting**
+
+ETM 58D Business Analytics Project *by Sena Torlak* 
+
+**Table of Content**
+
+<ol>
+<li>Introduction </li>
+<li>Setup & Library</li>
+<li>Descriptive Analysis</li>
+<li>Data Manipulation </li>
+<li> Modelling </li>
+<li>Prediction for the Test Period </li>
+<li>Possible Extensions</li>
+</ol>
+
+#Introduction
+
+*Problem description*
+
+In this project, it is aimed to make an hourly solar energy forecast for the next day with KIVANC 2 SPP (Solar Power Plant). KIVANÇ 2 SPP is located in Mersin (between 36-37° north latitude and 33-35° east longitude) and detailed information about capacity and location can be found at .<a href="https://www.kivancenerji.com.tr/kivanc2ges.html"> their site</a>.
+
+*Assumption and approach*
+
+The forecast can be used in real life needs of energy traders operating in energy markets. The assumption in this project is that on day d, forecasts are needed for day d+1 and you know the production values by the end of day d-1. In real life, forecasts for the next day (i.e. d+1) should be sent before 12:00 on day d.
+
+Within the scope of the said scenario, it was tried to estimate the hourly solar production for the period between 1 March and 7 May 2022 by using different regression methods. Applied regression models ... The relationship between these different regression methods was examined.
+
+*Descriptive analysis of the given data*
+
+Provided dataset for the prediction includes the weather measurements for 9 grid points (coordinates) nearby the power plant. The weather variables that can help for solar power plant production forecasting are TEMP (Temperature at the provided location), REL_HUMIDITY (Relative humidity at the provided location), DSWRF (The short version of downward shortwave radiation flux), CLOUD_LOW_LAYER (Total cloud cover data in terms of percentage for low-level type of clouds). When checked, it was observed that there were no missing values in the date and hours data.
+
+
+#Setup & Library
+
+```{r message=FALSE,warning=FALSE}
+#install.packages("tidyverse")
+#install.packages("lubridate")
+#install.packages("readxl")
+#install.packages("skimr")
+#install.packages("magrittr")
+#install.packages("tidyquant")
+#install.packages("tsibble")
+#install.packages("feasts")
+#install.packages("ggcorrplot")
+#install.packages("glmnet")
+#install.packages("caret")
+#install.packages("rattle")
+#install.packages("data.table")
+#install.packages("reshape")
+
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(skimr)
+library(magrittr)
+library(tidyquant)
+library(tsibble)
+library(feasts)
+library(ggcorrplot)
+library(glmnet)
+library(caret)
+library(rattle)
+library(data.table)
+library(reshape)
+
+set.seed(1234)
+```
+
+#Import Data 
+Hourly solar power plan production data is imported from csv file.
+
+```{r message=FALSE,warning=FALSE}
+
+production=fread("C:/Users/user/Documents/GitHub/spring22-senatorlakk/Project/production.csv")
+weather=fread("C:/Users/user/Documents/GitHub/spring22-senatorlakk/Project/long_weather.csv")
+
+head(production)
+head(weather)
+
+production[,timestamp:=as.Date(date)+dhours(hour)]
+head(production)
+
+ggplot(production,aes(x=timestamp,y=production)) + geom_line()
+ggplot(production[date>'2022-04-25'],aes(x=timestamp,y=production)) + geom_line()
+
+weather[,.N,list(lat,lon)]
+weather[,.N,list(variable)]
+
+dswrf=weather[variable=='DSWRF' & lat==36.5 & lon==33.25]
+dswrf[,timestamp:=as.Date(date)+dhours(hour)]
+head(dswrf)
+```
+
+Missing values are removed to prepare the data. 
+
+Production values have a continues trend related to timestamp. 
+
+```{r message=FALSE,warning=FALSE}
+ggplot(dswrf[date>'2022-04-25'],aes(x=timestamp,y=value)) + geom_line() + geom_line()
+
+wide_weather=dcast(weather,date+hour~variable+lat+lon,value.var='value')
+
+str(wide_weather)
+str(production)
+
+```
+Hourly Solar Production
+In order to understand the hourly solar production, descriptive analysis is conducted. 
+
+```{r message=FALSE,warning=FALSE}
+skim(wide_weather)
+solarprodhourly = production %>%
+  group_by(hour) %>%
+  summarise(
+    count = n(),
+    mean_production = mean(production),
+    min_production = min(production),
+    max_production = max(production)
+  )
+solarprodhourly
+```
+
+Since there is no sunlight & production at night, data will be analyses between 05.00 am and 19.00 pm. (findings are based on histogram data.)
+
+```{r message=FALSE,warning=FALSE}
+ggplot(solarprodhourly, aes(x=hour, y=mean_production)) + geom_bar(stat = "identity")
+
+```
+So we can focus only to daytime. 
+
+
+```{r message=FALSE,warning=FALSE}
+  daytime <- solarprodhourly %>% filter(hour >= 5 & hour <= 19)
+  head(daytime, 20)
+```
+#Descriptive Analyses
+
+In orer to understand how the independent and dependent variables are distributed over time and how tehy are related to each other below analysis handled. 
+
+##Independent Variables 
+
+Time series of independent variables are given below. 
+
+```{r message=FALSE,warning=FALSE}
+
+wide_weather$CLOUD_LOW_LAYER_AVG=(wide_weather$CLOUD_LOW_LAYER_36.25_33+
+              wide_weather$CLOUD_LOW_LAYER_36.25_33.25+wide_weather$CLOUD_LOW_LAYER_36.25_33.5+
+              wide_weather$CLOUD_LOW_LAYER_36.5_33+wide_weather$CLOUD_LOW_LAYER_36.5_33.25+
+              wide_weather$CLOUD_LOW_LAYER_36.5_33.5+wide_weather$CLOUD_LOW_LAYER_36.75_33+
+              wide_weather$CLOUD_LOW_LAYER_36.75_33.25+wide_weather$CLOUD_LOW_LAYER_36.75_33.5)/9
+
+wide_weather$DSWRF_AVG =(wide_weather$DSWRF_36.25_33+
+              wide_weather$DSWRF_36.25_33.25+wide_weather$DSWRF_36.25_33.5+
+              wide_weather$DSWRF_36.5_33+wide_weather$DSWRF_36.5_33.25+
+              wide_weather$DSWRF_36.5_33.5+wide_weather$DSWRF_36.75_33+
+              wide_weather$DSWRF_36.75_33.25+wide_weather$DSWRF_36.75_33.5)/9
+
+wide_weather$TEMP_AVG  =(wide_weather$TEMP_36.25_33+
+              wide_weather$TEMP_36.25_33.25+wide_weather$TEMP_36.25_33.5+
+              wide_weather$TEMP_36.5_33+wide_weather$TEMP_36.5_33.25+
+              wide_weather$TEMP_36.5_33.5+wide_weather$TEMP_36.75_33+
+              wide_weather$TEMP_36.75_33.25+wide_weather$TEMP_36.75_33.5)/9
+ 
+wide_weather$HUMD_AVG  =(wide_weather$REL_HUMIDITY_36.25_33+
+              wide_weather$REL_HUMIDITY_36.25_33.25+wide_weather$REL_HUMIDITY_36.25_33.5+
+              wide_weather$REL_HUMIDITY_36.5_33+wide_weather$REL_HUMIDITY_36.5_33.25+
+              wide_weather$REL_HUMIDITY_36.5_33.5+wide_weather$REL_HUMIDITY_36.75_33+
+              wide_weather$REL_HUMIDITY_36.75_33.25+wide_weather$REL_HUMIDITY_36.75_33.5)/9
+
+
+ggplot(wide_weather,aes(x=date,y=CLOUD_LOW_LAYER_AVG))+ 
+  geom_line(color="red")+
+  ggtitle("Time Series of Cloud Low Layer Average",
+          subtitle="Between Feb'21 & May'22")
+
+ggplot(wide_weather,aes(x=date,y=DSWRF_AVG))+ 
+  geom_line(color="purple")+
+  ggtitle("Time Series of DSWRF Average",
+          subtitle="Between Feb'21 & May'22")
+
+ggplot(wide_weather,aes(x=date,y=TEMP_AVG))+ 
+  geom_line(color="green")+
+  ggtitle("Time Series ofTemperature Average ",
+          subtitle="Between Feb'21 & May'22")
+
+ggplot(wide_weather,aes(x=date,y=HUMD_AVG))+ 
+  geom_line(color="blue")+
+  ggtitle("Time Series of Humidity Average",
+          subtitle="Between Feb'21 & May'22")
+
+```
+
+```{r message=FALSE,warning=FALSE}
+
+weathernew = wide_weather[,-(3:38)]
+head(data.table(weathernew))
+
+weathernew[,timestamp:=as.Date(date)+dhours(hour)]
+
+
+weather_production <- production %>% full_join(weathernew,by="timestamp")
+head(weather_production)
+weather_production <- weather_production %>% filter(hour.x >= 5 & hour.x <= 19)
+  head(weather_production, 20)
+
+
+```
+
+##Histograms of Target & Independent Variables 
+
+```{r message=FALSE,warning=FALSE}
+ggplot(weather_production, aes(x=production)) + geom_histogram()
+ggplot(weather_production, aes(x=CLOUD_LOW_LAYER_AVG)) + geom_histogram()
+ggplot(weather_production, aes(x=DSWRF_AVG)) + geom_histogram()
+ggplot(weather_production, aes(x=TEMP_AVG)) + geom_histogram()
+ggplot(weather_production, aes(x=HUMD_AVG)) + geom_histogram()
+
+```
+
+##Boxplot of Target & Independent Variables 
+
+```{r message=FALSE,warning=FALSE}
+par(mfrow=c(2,3))
+boxplot(weather_production$production, main = "Production")
+boxplot(weather_production$CLOUD_LOW_LAYER_AVG, main = "Cloud Low Layer")
+boxplot(weather_production$DSWRF_AVG, main = "DSWRF")
+boxplot(weather_production$TEMP_AVG, main = "Temperature")
+boxplot(weather_production$HUMD_AVG, main = "Humidity")
+par(mfrow=c(1,1))
+```
+
+##Scatterplots
+
+Scatter plot of Cloud Low Layer vs Production values is shown below. We can observe that higher cloud low layer values causes lower frequency for high production values.
+
+
+```{r message=FALSE,warning=FALSE}
+
+plot(weather_production$CLOUD_LOW_LAYER_AVG, weather_production$production, xlab = "Cloud Low Layer", ylab = "Production", main = "Cloud Low Layer-Production Scatter Plot")
+
+```
+
+
+Scatter plot of DSWRF vs Production values is shown below. We can say that DSWRF values are directly proportional to the Production values. As the DSWRF values increases, the Production values also increase. 
+
+```{r message=FALSE,warning=FALSE}
+
+plot(weather_production$DSWRF_AVG, weather_production$Production, xlab = "DSWRF", ylab = "Production", main = "DSWRF-Production Scatter Plot")
+
+```
+Scatter plot of Hour vs DSWRF values is shown below. There is a relationship between DSWRF values and hours similar to the relation of Production-Hour.
+
+```{r message=FALSE,warning=FALSE}
+plot(weather_production$hour.x, weather_production$DSWRF_AVG , xlab = "Hour", ylab = "DSWRF", main = "Hour-DSWRF Scatter Plot")
+
+```
+Scatter plot of Hour vs Temperature values is shown below. As it is expected, temperature are higher at afternoon hours and lower at morning and evening hours
+
+```{r message=FALSE,warning=FALSE}
+plot(weather_production$hour.x, weather_production$TEMP_AVG, xlab = "Hour", ylab = "Temperature", main = "Hour-Temperature Scatter Plot")
+
+```
+Scatter plot of DSWRF vs Temperature values is shown below. It is obvious that low temperature values correspond to low DSWRF values, while the higher DSWRF values, the slightly higher the temperature values.
+
+
+```{r message=FALSE,warning=FALSE}
+plot(weather_production$DSWRF_AVG, weather_production$TEMP_AVG , xlab = "DSWRF", ylab = "Temperature", main = "DSWRF-Temperature Scatter Plot")
+
+```
+Scatter plot of Humidity vs Production values is shown below. We can say that there is no specific connection between them.
+
+```{r message=FALSE,warning=FALSE}
+
+plot(weather_production$production, weather_production$HUMD_AVG , xlab = "Production", ylab = "Humidity", main = "Prodcution-Humidity Scatter Plot")
+
+```
+Scatter plot of Humidity vs Cloud Low Layer values is shown below. We can say that Humidity & Cloud Low Layer are positively related to each other. So indirectly humidity is affected production as well. 
+
+```{r message=FALSE,warning=FALSE}
+
+plot(weather_production$HUMD_AVG, weather_production$CLOUD_LOW_LAYER_AVG , xlab = "Humidity", ylab = "Cloud Low Layer", main = "Cloud Low Layer-Humidity Scatter Plot")
+
+```
+
+##Lineplots
+
+
+Line plot of Production as a time series for each hour is shown below. We can observe that there is seasonal effect on the production for morning and evening hours as the day hours are shifting along the year.
+
+```{r message=FALSE,warning=FALSE}
+
+weather_production %>%
+  ggplot(aes(x = date.x, y = production)) + 
+  geom_line(aes(color = as.factor(hour.x)), size = 0.9, show.legend = F) + 
+  labs(title="Line plot of Production for each hour", y="Production Amount", x="Date") + 
+  facet_wrap(~hour.x, ncol=4) + 
+  theme_tq()
+
+```
+Line plot of Temperature as a time series for each hour is shown below. We can also observe the same seasonal effect on the temperature variable. Temperature is low at winter and autumn months, while it is higher in summer and spring months (as expected).
+
+```{r message=FALSE,warning=FALSE}
+
+weather_production %>%
+  ggplot(aes(x = date.x, y = TEMP_AVG)) + 
+  geom_line(aes(color = as.factor(hour.x)), size = 0.9, show.legend = F) + 
+  labs(title="Line plot of Temperature for each hour", y="Temperature", x="Date") + 
+  facet_wrap(~hour.x, ncol=4) + 
+  theme_tq()
+
+```
+Line plot of DSWRF as a time series for each hour is shown below. We can see the same seasonal effect with temperature variable. However, DSWRF values are almost zero in morning hours.
+
+```{r message=FALSE,warning=FALSE}
+
+weather_production %>%
+  ggplot(aes(x = date.x, y = DSWRF_AVG)) + 
+  geom_line(aes(color = as.factor(hour.x)), size = 0.9, show.legend = F) + 
+  labs(title="Line plot of DSWRF for each hour", y="DSWRF", x="Date") + 
+  facet_wrap(~hour.x, ncol=4) + 
+  theme_tq()
+
+```
+Line plot of Cloud Low Layer as a time series for each hour is shown below. We can state that there are very few cloudy days at summer months (as expected).
+
+```{r message=FALSE,warning=FALSE}
+
+weather_production %>%
+  ggplot(aes(x = date.x, y = CLOUD_LOW_LAYER_AVG)) + 
+  geom_line(aes(color = as.factor(hour.x)), size = 0.9, show.legend = F) + 
+  labs(title="Line plot of Cloud Low Layer for each hour", y="Cloud Low Layer", x="Date") + 
+  facet_wrap(~hour.x, ncol=4) + 
+  theme_tq()
+
+
+```
+
+
+Line plot of Humidity as a time series for each hour is shown below. We can state that there is a very similar trend among humidity lines which is affected by the time of year - similar with TEMP. 
+
+```{r message=FALSE,warning=FALSE}
+
+weather_production %>%
+  ggplot(aes(x = date.x, y = HUMD_AVG)) + 
+  geom_line(aes(color = as.factor(hour.x)), size = 0.9, show.legend = F) + 
+  labs(title="Line plot of Humidity for each hour", y="Humidity", x="Date") + 
+  facet_wrap(~hour.x, ncol=4) + 
+  theme_tq()
+
+
+```
+##Pairwise Correlations
+
+Pairwise correlation of independent variables & dependent variable is shown below. We can state that production is positively correlated to DSWRF & TEMP, while negative correlated with HUMD & Cloud Layers.
+
+```{r message=FALSE,warning=FALSE}
+#install.packages("corrplot")
+library(corrplot)
+cor_numVar <- cor(weather_production[,c(3,7,8,9,10)], use="pairwise.complete.obs") 
+corrplot.mixed(cor_numVar, tl.col="black", tl.pos = "lt")
+
+```
+
+##Tuning 
+
+Finding the largest mean production level for the whole data to use that hour for parameter tuning and use the same parameters for other hours. Hour **11** or **12** can be used for parameter tuning.
+
+```{r message=FALSE,warning=FALSE}
+weather_production %>% group_by(hour.x) %>%  summarise(mean_production = mean(production)) %>% arrange(desc(mean_production))
+```
+
+#Data Manipulation 
+
+##Lagging 
+
+Lag arranged different time of day, fromm 1 to 168 hour with different time series like (1 Hour, 6 Hour, 12 Hour, 24 Hour, 48 Hour, 168 Hour (one week))
+
+```{r message=FALSE,warning=FALSE}
+## 1 Hour Lag
+weather_production$Production1hourlag  = lag(weather_production$production, 1)
+weather_production$Cloud1hourlag  = lag(weather_production$CLOUD_LOW_LAYER_AVG, 1)
+weather_production$Dswrf1hourlag  = lag(weather_production$DSWRF_AVG, 1)
+weather_production$Temp1hourlag  = lag(weather_production$TEMP_AVG, 1)
+weather_production$Humidity1hourlag  = lag(weather_production$HUMD_AVG, 1)
+
+## 6 Hour Lag
+weather_production$Production6hourlag  = lag(weather_production$production, 6)
+weather_production$Cloud6hourlag  = lag(weather_production$CLOUD_LOW_LAYER_AVG, 6)
+weather_production$Dswrf6hourlag  = lag(weather_production$DSWRF_AVG, 6)
+weather_production$Temp6hourlag  = lag(weather_production$TEMP_AVG, 6)
+weather_production$Humidity6hourlag  = lag(weather_production$HUMD_AVG, 6)
+
+## 12 Hour Lag
+weather_production$Production12hourlag  = lag(weather_production$production, 12)
+weather_production$Cloud12hourlag  = lag(weather_production$CLOUD_LOW_LAYER_AVG, 12)
+weather_production$Dswrf12hourlag  = lag(weather_production$DSWRF_AVG, 12)
+weather_production$Temp12hourlag  = lag(weather_production$TEMP_AVG, 12)
+weather_production$Humidity12hourlag  = lag(weather_production$HUMD_AVG, 12)
+
+
+## 24 Hour Lag
+weather_production$Production24hourlag  = lag(weather_production$production, 24)
+weather_production$Cloud24hourlag  = lag(weather_production$CLOUD_LOW_LAYER_AVG, 24)
+weather_production$Dswrf24hourlag  = lag(weather_production$DSWRF_AVG, 24)
+weather_production$Temp24hourlag  = lag(weather_production$TEMP_AVG, 24)
+weather_production$Humidity24hourlag  = lag(weather_production$HUMD_AVG, 24)
+
+## 48 Hour Lag
+weather_production$Production48hourlag  = lag(weather_production$production, 48)
+weather_production$Cloud48hourlag  = lag(weather_production$CLOUD_LOW_LAYER_AVG, 48)
+weather_production$Dswrf48hourlag  = lag(weather_production$DSWRF_AVG, 48)
+weather_production$Temp48hourlag  = lag(weather_production$TEMP_AVG, 48)
+weather_production$Humidity48hourlag  = lag(weather_production$HUMD_AVG, 48)
+
+## 168 Hour Lag
+weather_production$Production168hourlag  = lag(weather_production$production, 168)
+weather_production$Cloud168hourlag  = lag(weather_production$CLOUD_LOW_LAYER_AVG, 168)
+weather_production$Dswrf168hourlag  = lag(weather_production$DSWRF_AVG, 168)
+weather_production$Temp168hourlag  = lag(weather_production$TEMP_AVG, 168)
+weather_production$Humidity168hourlag  = lag(weather_production$HUMD_AVG, 168)
+
+
+weather_production$Production3hourMA  = rollmean(weather_production$TEMP_AVG, 3,na.pad = T, align = "right")
+weather_production$Dswrf3hourMA  = rollmean(weather_production$TEMP_AVG, 3,na.pad = T, align = "right")
+weather_production$Temp3hourMA  = rollmean(weather_production$TEMP_AVG, 3,na.pad = T, align = "right")
+
+weather_production$Production24hourMA  = rollmean(weather_production$TEMP_AVG, 24,na.pad = T, align = "right")
+weather_production$Cloud24hourMA  = rollmean(weather_production$TEMP_AVG, 24,na.pad = T, align = "right")
+weather_production$Dswrf24hourMA  = rollmean(weather_production$TEMP_AVG, 24,na.pad = T, align = "right")
+weather_production$Temp24hourMA  = rollmean(weather_production$TEMP_AVG, 24,na.pad = T, align = "right")
+
+weather_production$Production48hourMA  = rollmean(weather_production$TEMP_AVG, 48,na.pad = T, align = "right")
+weather_production$Cloud48hourMA  = rollmean(weather_production$TEMP_AVG, 48,na.pad = T, align = "right")
+weather_production$Dswrf48hourMA  = rollmean(weather_production$TEMP_AVG, 48,na.pad = T, align = "right")
+weather_production$Temp48hourMA  = rollmean(weather_production$TEMP_AVG, 48,na.pad = T, align = "right")
+
+weather_production$Production168hourMA  = rollmean(weather_production$TEMP_AVG, 168,na.pad = T, align = "right")
+weather_production$Cloud168hourMA  = rollmean(weather_production$TEMP_AVG, 168,na.pad = T, align = "right")
+weather_production$Dswrf168hourMA  = rollmean(weather_production$TEMP_AVG, 168,na.pad = T, align = "right")
+weather_production$Temp168hourMA  = rollmean(weather_production$TEMP_AVG, 168,na.pad = T, align = "right")
+
+
+weather_production = weather_production[complete.cases(weather_production), ]
+head(weather_production)
+```
+
+
+##Train and test data sets 
+
+
+```{r message=FALSE,warning=FALSE}
+weather_production_train<- weather_production %>% filter(date.x < as_date('2021-12-31')) 
+weather_production_test <- weather_production %>% filter(date.x >= as_date('2022-01-01') & date.x <= as_date('2022-02-28'))
+
+```
+
+Splitting train data into hourly format to have different models for every hour
+
+```{r message=FALSE,warning=FALSE}
+weather_production_train_h5 <- weather_production_train %>% filter(hour.x == 5)
+weather_production_train_h6 <- weather_production_train %>% filter(hour.x == 6)
+weather_production_train_h7 <- weather_production_train %>% filter(hour.x == 7)
+weather_production_train_h8 <- weather_production_train %>% filter(hour.x == 8)
+weather_production_train_h9 <- weather_production_train %>% filter(hour.x == 9)
+weather_production_train_h10 <- weather_production_train %>% filter(hour.x == 10)
+weather_production_train_h11 <- weather_production_train %>% filter(hour.x == 11)
+weather_production_train_h12 <- weather_production_train %>% filter(hour.x == 12)
+weather_production_train_h13 <- weather_production_train %>% filter(hour.x == 13)
+weather_production_train_h14 <- weather_production_train %>% filter(hour.x == 14)
+weather_production_train_h15 <- weather_production_train %>% filter(hour.x == 15)
+weather_production_train_h16 <- weather_production_train %>% filter(hour.x == 16)
+weather_production_train_h17 <- weather_production_train %>% filter(hour.x == 17)
+weather_production_train_h18 <- weather_production_train %>% filter(hour.x == 18)
+weather_production_train_h19 <- weather_production_train %>% filter(hour.x == 19)
+
+```
+
+Splitting test data into hourly format to have different models for every hour
+
+
+```{r message=FALSE,warning=FALSE}
+weather_production_test_h5 <- weather_production_test %>% filter(hour.x == 5)
+weather_production_test_h6 <- weather_production_test %>% filter(hour.x == 6)
+weather_production_test_h7 <- weather_production_test %>% filter(hour.x == 7)
+weather_production_test_h8 <- weather_production_test %>% filter(hour.x == 8)
+weather_production_test_h9 <- weather_production_test %>% filter(hour.x == 9)
+weather_production_test_h10 <- weather_production_test %>% filter(hour.x == 10)
+weather_production_test_h11 <- weather_production_test %>% filter(hour.x == 11)
+weather_production_test_h12 <- weather_production_test %>% filter(hour.x == 12)
+weather_production_test_h13 <- weather_production_test %>% filter(hour.x == 13)
+weather_production_test_h14 <- weather_production_test %>% filter(hour.x == 14)
+weather_production_test_h15 <- weather_production_test %>% filter(hour.x == 15)
+weather_production_test_h16 <- weather_production_test %>% filter(hour.x == 16)
+weather_production_test_h17 <- weather_production_test %>% filter(hour.x == 17)
+weather_production_test_h18 <- weather_production_test %>% filter(hour.x == 18)
+weather_production_test_h19 <- weather_production_test %>% filter(hour.x == 19)
+
+```
+
+#Modelling 
+
+
+
+Different models such as linear regression, decision tree, random forest, GLMNET are tried for data set of Hour 11 to make the parameter tuning on the data.
+
+```{r message=FALSE,warning=FALSE}
+fitControl <- trainControl(method = "repeatedcv",
+                           number = 5,
+                           repeats = 5)
+
+```
+
+##Linear Regression 
+Linear Regression model with repeated cross validation (fitControl) is created by using caret package ("rpart" method). According to results, intercept parameter is tuned and set to **TRUE**.
+
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h11 <- train(production ~ ., 
+                 data = weather_production_train_h11 %>% select(-date.x, -hour.x),
+                 method = "lm",
+                 trControl = fitControl,
+                 tuneLength = 5)
+lin_reg_h11
+summary(lin_reg_h11)
+lin_reg_h11$finalModel
+```
+##Decision Tree
+
+Decision Tree model with repeated cross validation (fitControl) is created by using caret package (“rpart” method). According to results, cp parameter is tuned and set to **0.01524276**
+
+```{r message=FALSE,warning=FALSE}
+
+dec_tree_h11 <- train(production ~ ., 
+                  data = weather_production_train_h11 %>% select(-date.x, -hour.x),
+                  method = "rpart",
+                  trControl = fitControl,
+                  tuneLength = 5)
+dec_tree_h11
+```
+
+```{r message=FALSE,warning=FALSE}
+trellis.par.set(caretTheme())
+plot(dec_tree_h11)
+
+```
+
+```{r message=FALSE,warning=FALSE}
+fancyRpartPlot(dec_tree_h11$finalModel)
+
+```
+
+```{r message=FALSE,warning=FALSE}
+dec_tree_h11$finalModel
+```
+##Random Forest 
+
+Random Forest model with repeated cross validation (fitControl) is created by using caret package (“ranger” method). Impurity measure is used as an importance criteria and number of trees parameter is selected as 50 because of performance issues. According to results, mtry parameter is tuned and set to **52**, splitrule parameter is tuned and set to “extratrees”, min.node.size parameter is tuned and set to **5**.
+
+```{r message=FALSE,warning=FALSE}
+rand_forest_h11 <- train(production ~ ., 
+                       data = weather_production_train_h11 %>% select(-date.x, -hour.x),
+                       method = "ranger",
+                       trControl = fitControl,
+                       num.trees = 50,
+                       importance = "impurity")
+rand_forest_h11
+```
+
+
+```{r message=FALSE,warning=FALSE}
+plot(rand_forest_h11)
+```
+
+```{r setup, include=FALSE}
+rand_forest_h11$finalModel
+```
+
+##GLMNET
+
+GLMNET model with repeated cross validation (fitControl) is created by using caret package (“glmnet” method). According to results, alpha parameter is tuned and set to **0.55**, lambda parameter is tuned and set to **0.2097799**
+
+
+```{r message=FALSE,warning=FALSE}
+glmnet_h11 <- train(production ~ ., 
+                         data = weather_production_train_h11 %>% select(-date.x, -hour.x),
+                         method = "glmnet",
+                         trControl = fitControl,
+                         tuneLenght= 6)
+glmnet_h11
+```
+```{r message=FALSE,warning=FALSE}
+plot(glmnet_h11)
+```
+##Model Comparison
+
+Candidate models for Hour 11 are compared below. It is seen that Random Forest model have almost same R-squared value with other models, however slightly lower (so better) MAE and RMSE values. As a result of these analysis, Random Forest model is selected.
+
+```{r message=FALSE,warning=FALSE}
+results = resamples(list(Linear_Regression = lin_reg_h11, Decision_Tree = dec_tree_h11, Random_Forest = rand_forest_h11, GLMNET = glmnet_h11))
+summary(results)
+```
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+##Modelling for each hour 
+
+###Hour 5
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h5 <- train(production ~ ., 
+                    data = weather_production_train_h5 %>% select(-date.x, -hour.x),
+                    method = "lm",
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(intercept = T),
+                    tuneLength = 5)
+
+dec_tree_h5 <- train(production ~ ., 
+                     data = weather_production_train_h5 %>% select(-date.x, -hour.x),
+                     method = "rpart",
+                     trControl = fitControl,
+                     tuneGrid = expand.grid(cp = 0.01524276),
+                     tuneLength = 6)
+
+rand_forest_h5 <- train(production ~ ., 
+                        data = weather_production_train_h5 %>% select(-date.x, -hour.x),
+                        method = "ranger",
+                        trControl = fitControl,
+                        num.trees = 50,
+                        tuneGrid = expand.grid(mtry = 52, splitrule = "extratrees", min.node.size = 5),
+                        importance = "impurity")
+
+glmnet_h5 <- train(production ~ ., 
+                   data = weather_production_train_h5 %>% select(-date.x, -hour.x),
+                   method = "glmnet",
+                   trControl = fitControl,
+                   tuneGrid = expand.grid(alpha = 0.55, lambda = 0.2097799),
+                   tuneLenght= 5)
+
+results = resamples(list(Linear_Regression = lin_reg_h5, Decision_Tree = dec_tree_h5, Random_Forest = rand_forest_h5, GLMNET = glmnet_h5))
+summary(results)
+```
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+###Hour 6
+
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h6 <- train(production ~ ., 
+                    data = weather_production_train_h6 %>% select(-date.x, -hour.x),
+                    method = "lm",
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(intercept = T),
+                    tuneLength = 5)
+
+dec_tree_h6 <- train(production ~ ., 
+                     data = weather_production_train_h6 %>% select(-date.x, -hour.x),
+                     method = "rpart",
+                     trControl = fitControl,
+                     tuneGrid = expand.grid(cp = 0.01524276),
+                     tuneLength = 6)
+
+rand_forest_h6 <- train(production ~ ., 
+                        data = weather_production_train_h6 %>% select(-date.x, -hour.x),
+                        method = "ranger",
+                        trControl = fitControl,
+                        num.trees = 50,
+                        tuneGrid = expand.grid(mtry = 52, splitrule = "extratrees", min.node.size = 5),
+                        importance = "impurity")
+
+glmnet_h6 <- train(production ~ ., 
+                   data = weather_production_train_h6 %>% select(-date.x, -hour.x),
+                   method = "glmnet",
+                   trControl = fitControl,
+                   tuneGrid = expand.grid(alpha = 0.55, lambda = 0.2097799),
+                   tuneLenght= 5)
+
+results = resamples(list(Linear_Regression = lin_reg_h6, Decision_Tree = dec_tree_h6, Random_Forest = rand_forest_h6, GLMNET = glmnet_h6))
+summary(results)
+```
+
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+
+###Hour 7
+
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h7 <- train(production ~ ., 
+                    data = weather_production_train_h7 %>% select(-date.x, -hour.x),
+                    method = "lm",
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(intercept = T),
+                    tuneLength = 5)
+
+dec_tree_h7 <- train(production ~ ., 
+                     data = weather_production_train_h7 %>% select(-date.x, -hour.x),
+                     method = "rpart",
+                     trControl = fitControl,
+                     tuneGrid = expand.grid(cp = 0.01524276),
+                     tuneLength = 6)
+
+rand_forest_h7 <- train(production ~ ., 
+                        data = weather_production_train_h7 %>% select(-date.x, -hour.x),
+                        method = "ranger",
+                        trControl = fitControl,
+                        num.trees = 50,
+                        tuneGrid = expand.grid(mtry = 52, splitrule = "extratrees", min.node.size = 5),
+                        importance = "impurity")
+
+glmnet_h7 <- train(production ~ ., 
+                   data = weather_production_train_h7 %>% select(-date.x, -hour.x),
+                   method = "glmnet",
+                   trControl = fitControl,
+                   tuneGrid = expand.grid(alpha = 0.55, lambda = 0.2097799),
+                   tuneLenght= 5)
+
+results = resamples(list(Linear_Regression = lin_reg_h7, Decision_Tree = dec_tree_h7, Random_Forest = rand_forest_h7, GLMNET = glmnet_h7))
+summary(results)
+```
+
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+###Hour 8
+
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h8 <- train(production ~ ., 
+                    data = weather_production_train_h8 %>% select(-date.x, -hour.x),
+                    method = "lm",
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(intercept = T),
+                    tuneLength = 5)
+
+dec_tree_h8 <- train(production ~ ., 
+                     data = weather_production_train_h8 %>% select(-date.x, -hour.x),
+                     method = "rpart",
+                     trControl = fitControl,
+                     tuneGrid = expand.grid(cp = 0.01524276),
+                     tuneLength = 6)
+
+rand_forest_h8 <- train(production ~ ., 
+                        data = weather_production_train_h8 %>% select(-date.x, -hour.x),
+                        method = "ranger",
+                        trControl = fitControl,
+                        num.trees = 50,
+                        tuneGrid = expand.grid(mtry = 52, splitrule = "extratrees", min.node.size = 5),
+                        importance = "impurity")
+
+glmnet_h8 <- train(production ~ ., 
+                   data = weather_production_train_h8 %>% select(-date.x, -hour.x),
+                   method = "glmnet",
+                   trControl = fitControl,
+                   tuneGrid = expand.grid(alpha = 0.55, lambda = 0.2097799),
+                   tuneLenght= 5)
+
+results = resamples(list(Linear_Regression = lin_reg_h8, Decision_Tree = dec_tree_h8, Random_Forest = rand_forest_h8, GLMNET = glmnet_h8))
+summary(results)
+```
+
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+###Hour 9
+
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h9 <- train(production ~ ., 
+                    data = weather_production_train_h9 %>% select(-date.x, -hour.x),
+                    method = "lm",
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(intercept = T),
+                    tuneLength = 5)
+
+dec_tree_h9 <- train(production ~ ., 
+                     data = weather_production_train_h9 %>% select(-date.x, -hour.x),
+                     method = "rpart",
+                     trControl = fitControl,
+                     tuneGrid = expand.grid(cp = 0.01524276),
+                     tuneLength = 6)
+
+rand_forest_h9 <- train(production ~ ., 
+                        data = weather_production_train_h9 %>% select(-date.x, -hour.x),
+                        method = "ranger",
+                        trControl = fitControl,
+                        num.trees = 50,
+                        tuneGrid = expand.grid(mtry = 52, splitrule = "extratrees", min.node.size = 5),
+                        importance = "impurity")
+
+glmnet_h9 <- train(production ~ ., 
+                   data = weather_production_train_h9 %>% select(-date.x, -hour.x),
+                   method = "glmnet",
+                   trControl = fitControl,
+                   tuneGrid = expand.grid(alpha = 0.55, lambda = 0.2097799),
+                   tuneLenght= 5)
+
+results = resamples(list(Linear_Regression = lin_reg_h9, Decision_Tree = dec_tree_h9, Random_Forest = rand_forest_h9, GLMNET = glmnet_h9))
+summary(results)
+```
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+
+###Hour 10
+
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h10 <- train(production ~ ., 
+                    data = weather_production_train_h10 %>% select(-date.x, -hour.x),
+                    method = "lm",
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(intercept = T),
+                    tuneLength = 5)
+
+dec_tree_h10 <- train(production ~ ., 
+                     data = weather_production_train_h10 %>% select(-date.x, -hour.x),
+                     method = "rpart",
+                     trControl = fitControl,
+                     tuneGrid = expand.grid(cp = 0.01524276),
+                     tuneLength = 6)
+
+rand_forest_h10 <- train(production ~ ., 
+                        data = weather_production_train_h10 %>% select(-date.x, -hour.x),
+                        method = "ranger",
+                        trControl = fitControl,
+                        num.trees = 50,
+                        tuneGrid = expand.grid(mtry = 52, splitrule = "extratrees", min.node.size = 5),
+                        importance = "impurity")
+
+glmnet_h10 <- train(production ~ ., 
+                   data = weather_production_train_h10 %>% select(-date.x, -hour.x),
+                   method = "glmnet",
+                   trControl = fitControl,
+                   tuneGrid = expand.grid(alpha = 0.55, lambda = 0.2097799),
+                   tuneLenght= 5)
+
+results = resamples(list(Linear_Regression = lin_reg_h10, Decision_Tree = dec_tree_h10, Random_Forest = rand_forest_h10, GLMNET = glmnet_h10))
+summary(results)
+```
+
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+
+###Hour 11
+
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h11 <- train(production ~ ., 
+                    data = weather_production_train_h11 %>% select(-date.x, -hour.x),
+                    method = "lm",
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(intercept = T),
+                    tuneLength = 5)
+
+dec_tree_h11 <- train(production ~ ., 
+                     data = weather_production_train_h11 %>% select(-date.x, -hour.x),
+                     method = "rpart",
+                     trControl = fitControl,
+                     tuneGrid = expand.grid(cp = 0.01524276),
+                     tuneLength = 6)
+
+rand_forest_h11 <- train(production ~ ., 
+                        data = weather_production_train_h11 %>% select(-date.x, -hour.x),
+                        method = "ranger",
+                        trControl = fitControl,
+                        num.trees = 50,
+                        tuneGrid = expand.grid(mtry = 52, splitrule = "extratrees", min.node.size = 5),
+                        importance = "impurity")
+
+glmnet_h11 <- train(production ~ ., 
+                   data = weather_production_train_h11 %>% select(-date.x, -hour.x),
+                   method = "glmnet",
+                   trControl = fitControl,
+                   tuneGrid = expand.grid(alpha = 0.55, lambda = 0.2097799),
+                   tuneLenght= 5)
+
+results = resamples(list(Linear_Regression = lin_reg_h11, Decision_Tree = dec_tree_h11, Random_Forest = rand_forest_h11, GLMNET = glmnet_h11))
+summary(results)
+```
+
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+
+###Hour 12
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h12 <- train(production ~ ., 
+                    data = weather_production_train_h12 %>% select(-date.x, -hour.x),
+                    method = "lm",
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(intercept = T),
+                    tuneLength = 5)
+
+dec_tree_h12 <- train(production ~ ., 
+                     data = weather_production_train_h12 %>% select(-date.x, -hour.x),
+                     method = "rpart",
+                     trControl = fitControl,
+                     tuneGrid = expand.grid(cp = 0.01524276),
+                     tuneLength = 6)
+
+rand_forest_h12 <- train(production ~ ., 
+                        data = weather_production_train_h12 %>% select(-date.x, -hour.x),
+                        method = "ranger",
+                        trControl = fitControl,
+                        num.trees = 50,
+                        tuneGrid = expand.grid(mtry = 52, splitrule = "extratrees", min.node.size = 5),
+                        importance = "impurity")
+
+glmnet_h12 <- train(production ~ ., 
+                   data = weather_production_train_h12 %>% select(-date.x, -hour.x),
+                   method = "glmnet",
+                   trControl = fitControl,
+                   tuneGrid = expand.grid(alpha = 0.55, lambda = 0.2097799),
+                   tuneLenght= 5)
+
+results = resamples(list(Linear_Regression = lin_reg_h12, Decision_Tree = dec_tree_h12, Random_Forest = rand_forest_h12, GLMNET = glmnet_h12))
+summary(results)
+```
+
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+###Hour 13
+
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h13 <- train(production ~ ., 
+                    data = weather_production_train_h13 %>% select(-date.x, -hour.x),
+                    method = "lm",
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(intercept = T),
+                    tuneLength = 5)
+
+dec_tree_h13 <- train(production ~ ., 
+                     data = weather_production_train_h13 %>% select(-date.x, -hour.x),
+                     method = "rpart",
+                     trControl = fitControl,
+                     tuneGrid = expand.grid(cp = 0.01524276),
+                     tuneLength = 6)
+
+rand_forest_h13 <- train(production ~ ., 
+                        data = weather_production_train_h13 %>% select(-date.x, -hour.x),
+                        method = "ranger",
+                        trControl = fitControl,
+                        num.trees = 50,
+                        tuneGrid = expand.grid(mtry = 52, splitrule = "extratrees", min.node.size = 5),
+                        importance = "impurity")
+
+glmnet_h13 <- train(production ~ ., 
+                   data = weather_production_train_h13 %>% select(-date.x, -hour.x),
+                   method = "glmnet",
+                   trControl = fitControl,
+                   tuneGrid = expand.grid(alpha = 0.55, lambda = 0.2097799),
+                   tuneLenght= 5)
+
+results = resamples(list(Linear_Regression = lin_reg_h13, Decision_Tree = dec_tree_h13, Random_Forest = rand_forest_h13, GLMNET = glmnet_h13))
+summary(results)
+```
+
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+###Hour 14
+
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h14 <- train(production ~ ., 
+                    data = weather_production_train_h14 %>% select(-date.x, -hour.x),
+                    method = "lm",
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(intercept = T),
+                    tuneLength = 5)
+
+dec_tree_h14 <- train(production ~ ., 
+                     data = weather_production_train_h14 %>% select(-date.x, -hour.x),
+                     method = "rpart",
+                     trControl = fitControl,
+                     tuneGrid = expand.grid(cp = 0.01524276),
+                     tuneLength = 6)
+
+rand_forest_h14 <- train(production ~ ., 
+                        data = weather_production_train_h14 %>% select(-date.x, -hour.x),
+                        method = "ranger",
+                        trControl = fitControl,
+                        num.trees = 50,
+                        tuneGrid = expand.grid(mtry = 52, splitrule = "extratrees", min.node.size = 5),
+                        importance = "impurity")
+
+glmnet_h14 <- train(production ~ ., 
+                   data = weather_production_train_h14 %>% select(-date.x, -hour.x),
+                   method = "glmnet",
+                   trControl = fitControl,
+                   tuneGrid = expand.grid(alpha = 0.55, lambda = 0.2097799),
+                   tuneLenght= 5)
+
+results = resamples(list(Linear_Regression = lin_reg_h14, Decision_Tree = dec_tree_h14, Random_Forest = rand_forest_h14, GLMNET = glmnet_h14))
+summary(results)
+```
+
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+###Hour 15
+
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h15 <- train(production ~ ., 
+                    data = weather_production_train_h15 %>% select(-date.x, -hour.x),
+                    method = "lm",
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(intercept = T),
+                    tuneLength = 5)
+
+dec_tree_h15 <- train(production ~ ., 
+                     data = weather_production_train_h15 %>% select(-date.x, -hour.x),
+                     method = "rpart",
+                     trControl = fitControl,
+                     tuneGrid = expand.grid(cp = 0.01524276),
+                     tuneLength = 6)
+
+rand_forest_h15 <- train(production ~ ., 
+                        data = weather_production_train_h15 %>% select(-date.x, -hour.x),
+                        method = "ranger",
+                        trControl = fitControl,
+                        num.trees = 50,
+                        tuneGrid = expand.grid(mtry = 52, splitrule = "extratrees", min.node.size = 5),
+                        importance = "impurity")
+
+glmnet_h15 <- train(production ~ ., 
+                   data = weather_production_train_h15 %>% select(-date.x, -hour.x),
+                   method = "glmnet",
+                   trControl = fitControl,
+                   tuneGrid = expand.grid(alpha = 0.55, lambda = 0.2097799),
+                   tuneLenght= 5)
+
+results = resamples(list(Linear_Regression = lin_reg_h15, Decision_Tree = dec_tree_h15, Random_Forest = rand_forest_h15, GLMNET = glmnet_h15))
+summary(results)
+```
+
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+
+###Hour 16
+
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h16 <- train(production ~ ., 
+                    data = weather_production_train_h16 %>% select(-date.x, -hour.x),
+                    method = "lm",
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(intercept = T),
+                    tuneLength = 5)
+
+dec_tree_h16 <- train(production ~ ., 
+                     data = weather_production_train_h16 %>% select(-date.x, -hour.x),
+                     method = "rpart",
+                     trControl = fitControl,
+                     tuneGrid = expand.grid(cp = 0.01524276),
+                     tuneLength = 6)
+
+rand_forest_h16 <- train(production ~ ., 
+                        data = weather_production_train_h16 %>% select(-date.x, -hour.x),
+                        method = "ranger",
+                        trControl = fitControl,
+                        num.trees = 50,
+                        tuneGrid = expand.grid(mtry = 52, splitrule = "extratrees", min.node.size = 5),
+                        importance = "impurity")
+
+glmnet_h16 <- train(production ~ ., 
+                   data = weather_production_train_h16 %>% select(-date.x, -hour.x),
+                   method = "glmnet",
+                   trControl = fitControl,
+                   tuneGrid = expand.grid(alpha = 0.55, lambda = 0.2097799),
+                   tuneLenght= 5)
+
+results = resamples(list(Linear_Regression = lin_reg_h16, Decision_Tree = dec_tree_h16, Random_Forest = rand_forest_h16, GLMNET = glmnet_h16))
+summary(results)
+```
+
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+
+###Hour 17
+
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h17 <- train(production ~ ., 
+                    data = weather_production_train_h17 %>% select(-date.x, -hour.x),
+                    method = "lm",
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(intercept = T),
+                    tuneLength = 5)
+
+dec_tree_h17 <- train(production ~ ., 
+                     data = weather_production_train_h17 %>% select(-date.x, -hour.x),
+                     method = "rpart",
+                     trControl = fitControl,
+                     tuneGrid = expand.grid(cp = 0.01524276),
+                     tuneLength = 6)
+
+rand_forest_h17 <- train(production ~ ., 
+                        data = weather_production_train_h17 %>% select(-date.x, -hour.x),
+                        method = "ranger",
+                        trControl = fitControl,
+                        num.trees = 50,
+                        tuneGrid = expand.grid(mtry = 52, splitrule = "extratrees", min.node.size = 5),
+                        importance = "impurity")
+
+glmnet_h17 <- train(production ~ ., 
+                   data = weather_production_train_h17 %>% select(-date.x, -hour.x),
+                   method = "glmnet",
+                   trControl = fitControl,
+                   tuneGrid = expand.grid(alpha = 0.55, lambda = 0.2097799),
+                   tuneLenght= 5)
+
+results = resamples(list(Linear_Regression = lin_reg_h17, Decision_Tree = dec_tree_h17, Random_Forest = rand_forest_h17, GLMNET = glmnet_h17))
+summary(results)
+```
+
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+
+###Hour 18
+
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h18 <- train(production ~ ., 
+                    data = weather_production_train_h18 %>% select(-date.x, -hour.x),
+                    method = "lm",
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(intercept = T),
+                    tuneLength = 5)
+
+dec_tree_h18 <- train(production ~ ., 
+                     data = weather_production_train_h18 %>% select(-date.x, -hour.x),
+                     method = "rpart",
+                     trControl = fitControl,
+                     tuneGrid = expand.grid(cp = 0.01524276),
+                     tuneLength = 6)
+
+rand_forest_h18 <- train(production ~ ., 
+                        data = weather_production_train_h18 %>% select(-date.x, -hour.x),
+                        method = "ranger",
+                        trControl = fitControl,
+                        num.trees = 50,
+                        tuneGrid = expand.grid(mtry = 52, splitrule = "extratrees", min.node.size = 5),
+                        importance = "impurity")
+
+glmnet_h18 <- train(production ~ ., 
+                   data = weather_production_train_h18 %>% select(-date.x, -hour.x),
+                   method = "glmnet",
+                   trControl = fitControl,
+                   tuneGrid = expand.grid(alpha = 0.55, lambda = 0.2097799),
+                   tuneLenght= 5)
+
+results = resamples(list(Linear_Regression = lin_reg_h18, Decision_Tree = dec_tree_h18, Random_Forest = rand_forest_h18, GLMNET = glmnet_h18))
+summary(results)
+```
+
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+
+###Hour 19
+
+
+```{r message=FALSE,warning=FALSE}
+lin_reg_h19 <- train(production ~ ., 
+                    data = weather_production_train_h19 %>% select(-date.x, -hour.x),
+                    method = "lm",
+                    trControl = fitControl,
+                    tuneGrid = expand.grid(intercept = T),
+                    tuneLength = 5)
+
+dec_tree_h19 <- train(production ~ ., 
+                     data = weather_production_train_h19 %>% select(-date.x, -hour.x),
+                     method = "rpart",
+                     trControl = fitControl,
+                     tuneGrid = expand.grid(cp = 0.01524276),
+                     tuneLength = 6)
+
+rand_forest_h19 <- train(production ~ ., 
+                        data = weather_production_train_h19 %>% select(-date.x, -hour.x),
+                        method = "ranger",
+                        trControl = fitControl,
+                        num.trees = 50,
+                        tuneGrid = expand.grid(mtry = 52, splitrule = "extratrees", min.node.size = 5),
+                        importance = "impurity")
+
+glmnet_h19 <- train(production ~ ., 
+                   data = weather_production_train_h19 %>% select(-date.x, -hour.x),
+                   method = "glmnet",
+                   trControl = fitControl,
+                   tuneGrid = expand.grid(alpha = 0.55, lambda = 0.2097799),
+                   tuneLenght= 5)
+
+results = resamples(list(Linear_Regression = lin_reg_h19, Decision_Tree = dec_tree_h19, Random_Forest = rand_forest_h19, GLMNET = glmnet_h19))
+summary(results)
+```
+
+
+```{r message=FALSE,warning=FALSE}
+bwplot(results)
+```
+
+#Prediction for the Test Period 
+
+As Random Forest model is generally the best one according to the model comparison results among hourly models, we choose to continue with Random Forest model to make the predictions on the test set. Below the predictions are done.
+
+
+```{r message=FALSE,warning=FALSE}
+rf_h5_pred_test <- predict(rand_forest_h5$finalModel, data = weather_production_test_h5)
+rf_h6_pred_test <- predict(rand_forest_h6$finalModel, data = weather_production_test_h6)
+rf_h7_pred_test <- predict(rand_forest_h7$finalModel, data = weather_production_test_h7)
+rf_h8_pred_test <- predict(rand_forest_h8$finalModel, data = weather_production_test_h8)
+rf_h9_pred_test <- predict(rand_forest_h9$finalModel, data = weather_production_test_h9)
+rf_h10_pred_test <- predict(rand_forest_h10$finalModel, data = weather_production_test_h10)
+rf_h11_pred_test <- predict(rand_forest_h11$finalModel, data = weather_production_test_h11)
+rf_h12_pred_test <- predict(rand_forest_h12$finalModel, data = weather_production_test_h12)
+rf_h13_pred_test <- predict(rand_forest_h13$finalModel, data = weather_production_test_h13)
+rf_h14_pred_test <- predict(rand_forest_h14$finalModel, data = weather_production_test_h14)
+rf_h15_pred_test <- predict(rand_forest_h15$finalModel, data = weather_production_test_h15)
+rf_h16_pred_test <- predict(rand_forest_h16$finalModel, data = weather_production_test_h16)
+rf_h17_pred_test <- predict(rand_forest_h17$finalModel, data = weather_production_test_h17)
+rf_h18_pred_test <- predict(rand_forest_h18$finalModel, data = weather_production_test_h18)
+rf_h19_pred_test <- predict(rand_forest_h19$finalModel, data = weather_production_test_h19)
+```
+Test set predictions are binded with test data set for each hour.
+
+```{r message=FALSE,warning=FALSE}
+df4_test_h5_w_pred <- weather_production_test_h5 %>% select(date.x, hour.x, production) %>% mutate(Prediction = rf_h5_pred_test$predictions)
+df4_test_h6_w_pred <- weather_production_test_h6 %>% select(date.x, hour.x, production) %>% mutate(Prediction = rf_h6_pred_test$predictions)
+df4_test_h7_w_pred <- weather_production_test_h7 %>% select(date.x, hour.x, production) %>% mutate(Prediction = rf_h7_pred_test$predictions)
+df4_test_h8_w_pred <- weather_production_test_h8 %>% select(date.x, hour.x, production) %>% mutate(Prediction = rf_h8_pred_test$predictions)
+df4_test_h9_w_pred <- weather_production_test_h9 %>% select(date.x, hour.x, production) %>% mutate(Prediction = rf_h9_pred_test$predictions)
+df4_test_h10_w_pred <- weather_production_test_h10 %>% select(date.x, hour.x, production) %>% mutate(Prediction = rf_h10_pred_test$predictions)
+df4_test_h11_w_pred <- weather_production_test_h11%>% select(date.x, hour.x, production) %>% mutate(Prediction = rf_h11_pred_test$predictions)
+df4_test_h12_w_pred <- weather_production_test_h12 %>% select(date.x, hour.x, production) %>% mutate(Prediction = rf_h12_pred_test$predictions)
+df4_test_h13_w_pred <- weather_production_test_h13 %>% select(date.x, hour.x, production) %>% mutate(Prediction = rf_h13_pred_test$predictions)
+df4_test_h14_w_pred <- weather_production_test_h14 %>% select(date.x, hour.x, production) %>% mutate(Prediction = rf_h14_pred_test$predictions)
+df4_test_h15_w_pred <- weather_production_test_h15 %>% select(date.x, hour.x, production) %>% mutate(Prediction = rf_h15_pred_test$predictions)
+df4_test_h16_w_pred <- weather_production_test_h16 %>% select(date.x, hour.x, production) %>% mutate(Prediction = rf_h16_pred_test$predictions)
+df4_test_h17_w_pred <- weather_production_test_h17 %>% select(date.x, hour.x, production) %>% mutate(Prediction = rf_h17_pred_test$predictions)
+df4_test_h18_w_pred <- weather_production_test_h18 %>% select(date.x, hour.x, production) %>% mutate(Prediction = rf_h18_pred_test$predictions)
+df4_test_h19_w_pred <- weather_production_test_h19 %>% select(date.x, hour.x, production) %>% mutate(Prediction = rf_h19_pred_test$predictions)
+```
+
+Test sets for each hour with predictions are row binded. Thus, we create one test set with prediction for whole data.
+
+```{r message=FALSE,warning=FALSE}
+df4_test_w_pred <- rbind(df4_test_h5_w_pred, df4_test_h6_w_pred, df4_test_h7_w_pred, df4_test_h8_w_pred,
+                         df4_test_h9_w_pred, df4_test_h10_w_pred, df4_test_h11_w_pred, df4_test_h12_w_pred, 
+                         df4_test_h13_w_pred, df4_test_h14_w_pred, df4_test_h15_w_pred, df4_test_h16_w_pred,
+                         df4_test_h17_w_pred, df4_test_h18_w_pred, df4_test_h19_w_pred) %>% arrange(date.x, hour.x)
+head(df4_test_w_pred,15)
+
+```
+
+```{r message=FALSE,warning=FALSE}
+skim(df4_test_w_pred %>% select(production, Prediction))
+```
+Prediction and residual analysis for test set of random forest model is shown. Actual vs Predicted plot shows that predicted values are generally close to the actual values. There are few observations which are too much deviated. Histogram of residuals shows normal distribution around mean value of 0 which is good for the model. Finally, predicted vs residuals plot shows that predicted values are distributed around 0 which is also good for the model even if there some few deviated values, they are not so important and not so much.
+
+```{r message=FALSE,warning=FALSE}
+plot(df4_test_w_pred$Prediction, df4_test_w_pred$production, xlab = "Predicted", ylab = "Actual", main = "Actual vs Predicted Plot for Random Forest Model with Test Set")
+abline(a=0,b=1,col='red', lty = 2)
+```
+```{r message=FALSE,warning=FALSE}
+rf_residuals_test <- df4_test_w_pred$production - df4_test_w_pred$Prediction
+hist(rf_residuals_test, xlab = "Residuals", main = "Residuals Histogram of Random Forest Model")
+```
+
+```{r message=FALSE,warning=FALSE}
+plot(df4_test_w_pred$Prediction, rf_residuals_test, xlab = "Predicted", ylab = "Residuals", main = "Predicted vs Residuals Plot for Random Forest Model with Test Set")
+abline(h = 0, col = "red", lty = 2)
+```
+
+Lastly, RMSE values of test set predictions are shown. It is not a high value which is also good for the model.
+
+```{r message=FALSE,warning=FALSE}
+RMSE(df4_test_w_pred$production, df4_test_w_pred$Prediction)
+
+```
+
+**Possible extensions to have a better approach** 
+<ol>
+<li>Relation between independent variables can be count into concept as correlation analysis. </li>
+<li>Coordinate based analysis caan be done to predict the production in a detailed manner</li>
+<li> It can be check whether there is any other independent variable to put in the model besides of these four.</li>
+</ol>
+
+
+
+
